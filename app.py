@@ -4,19 +4,23 @@ import streamlit as st
 # from swarm import Swarm, Agent
 from duckduckgo_search import DDGS
 from datetime import datetime
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 import os
 from groq import Groq
 from microagent import Microagent, Agent
 
-load_dotenv()
-openai.api_key = os.getenv("GROQ_API_KEY")
+# load_dotenv()
+# openai.api_key = os.getenv("GROQ_API_KEY")
+openai.api_key = st.secrets["GROQ_API_KEY"]
 
 
 
 # Initialize Groq client to get available models to choose from
+# groq_client = Groq(
+#     api_key=os.getenv("GROQ_API_KEY"),
+# )
 groq_client = Groq(
-    api_key=os.getenv("GROQ_API_KEY"),
+    api_key=st.secrets["GROQ_API_KEY"],
 )
 
 models = groq_client.models.list()
