@@ -63,6 +63,9 @@ def search_news(query):
     else:
         return f"Could not find news results for {query}"
 
+
+
+
 # Define callback function for model selection
 def update_model():
     st.session_state.selected_model = st.session_state.model_dropdown
@@ -98,8 +101,6 @@ with col1:
     )
     st.write(f"You have selected the model: **{selected_model}**")
 
-
-
 # Clear button
 with col2:
     if st.button("Clear"):
@@ -108,17 +109,21 @@ with col2:
         st.session_state.selected_model = "llama-3.2-90b-text-preview"
         st.rerun()
 
-
-
 # Define Agent 1 Role: Web search agent to fetch latest news
 web_search_agent = Agent(
     name = "Web Search Assistant",
     instructions = """Your role is to gather the latest, high-quality articles on the specified topics using the search_web and search_news functions. 
-                    Ensure each query adds new insights with unique results, and focus on sources that are authoritative, recent, and relevant.""",
+                    Make sure to leverage new insights with unique results, and focus on sources that are authoritative, recent, and relevant.""",
     functions=[search_web, search_news],
     model = st.session_state.selected_model,
     tool_choice = "auto"
 )
+
+def transfer_to_researcher():
+    """Transfer raw information immediately. """
+    return researcher_agent
+
+web_search_agent.functions.append(transfer_to_researcher)
 
 # Define Agent 2 Role: Senior Research Analyst
 researcher_agent = Agent(
@@ -151,7 +156,8 @@ def run_workflow(query):
     # search the web
     raw_response = client.run(
         agent = web_search_agent,
-        messages = [{"role": "user", "content": f"Search Duckduckgo for {query}"}]
+        max_turns = 2,
+        messages = [{"role": "user", "content": f"Search Duckduckgo for {query}"}],
     )
     # print(news_response)
     raw_information = raw_response.messages[-1]["content"]
