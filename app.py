@@ -26,13 +26,23 @@ groq_client = Groq(
 models = groq_client.models.list()
 ids = [item.id for item in  models.data]
 
-
+default_model = "llama-3.2-90b-text-preview"
 
 # initialize Microagent client
 client = Microagent(llm_type='groq')
 
 # initialize search client
 ddgs = DDGS()
+
+# Initialize session state for query and article
+if 'query' not in st.session_state:
+    st.session_state.query = ""
+if 'article' not in st.session_state:
+    st.session_state.article = ""
+if 'selected_model' not in st.session_state:
+    # Set the default model if not in session state
+    st.session_state.selected_model = default_model
+
 
 # Search the web for the given query
 def search_web(query):
@@ -67,67 +77,22 @@ def search_news(query):
     else:
         return f"Could not find news results for {query}"
 
-
-
-
-# Define callback function for model selection
-def update_model():
-    st.session_state.selected_model = st.session_state.model_dropdown
-
-# streamlit app
-
-st.set_page_config(page_title="Duckduckgo Research Assistant 🔎", page_icon="🔎")
-st.title("Duckduckgo Web and News Research Assistant 🔎")
-st.write("Search for a topic and generate an article with multi-agent RAG. Note: some models may not support tools.")
-
-# Initialize session state for query and article
-if 'query' not in st.session_state:
-    st.session_state.query = ""
-if 'article' not in st.session_state:
-    st.session_state.article = ""
-if 'selected_model' not in st.session_state:
-    # Set the default model if not in session state
-    st.session_state.selected_model = "llama-3.2-90b-text-preview"
-
-# Create two columns for the input and clear button
-col1, col2 = st.columns([3, 1])
-
-# Search query input
-with col1:
-    query = st.text_input(label = "Enter your search query",label_visibility = "collapsed",  placeholder = "Enter your search query")
-
-    selected_model = st.selectbox(
-        "Choose a model. Default: **llama-3.2-90b-text-preview**:",
-        options = ids,
-        index=ids.index(st.session_state.selected_model),
-        key="model_dropdown",
-        on_change=update_model
-    )
-    st.write(f"You have selected the model: **{selected_model}**")
-
-# Clear button
-with col2:
-    if st.button("Clear"):
-        st.session_state.query = ""
-        st.session_state.article = ""
-        st.session_state.selected_model = "llama-3.2-90b-text-preview"
-        st.rerun()
-
-# Define Agent 1 Role: Web search agent to fetch latest news
-web_search_agent = Agent(
-    name = "Web Search Assistant",
-    instructions = """Your role is to gather the latest, high-quality articles on the specified topics using the search_web and search_news functions. 
-                    Make sure to leverage new insights with unique results, and focus on sources that are authoritative, recent, and relevant.""",
-    functions=[search_web, search_news],
-    model = st.session_state.selected_model,
-    tool_choice = "auto"
-)
-
 def transfer_to_researcher():
     """Transfer raw information immediately. """
     return researcher_agent
 
-web_search_agent.functions.append(transfer_to_researcher)
+# Define Agent 1 Role: Web search agent to fetch latest news
+web_search_agent = Agent(
+    name = "Web Search Assistant",
+    instructions = """Your role is to gather the latest, high-quality articles on the specified topics using the internet search tools provided to you. 
+                    Make sure to leverage new insights with unique results, and focus on sources that are authoritative, recent, and relevant.
+                    Prioritize searching the news if the user is looking for recent information.""",
+    functions=[search_web, search_news],
+    model = st.session_state.selected_model,
+    tool_choice = "auto",
+)
+
+# web_search_agent.functions.extend(transfer_to_researcher)
 
 # Define Agent 2 Role: Senior Research Analyst
 researcher_agent = Agent(
@@ -137,7 +102,7 @@ researcher_agent = Agent(
                     2. Key topics organized by primary themes.
                     3. Deduplication of content while flagging any contradictory statements.
                     4. Enhanced focus on high-authority sources and verifying data across multiple sources.
-                    5. Extract important dates, statistics, quotes, and ensure accurate source attribution. Organize information in a logical, reader-centric way.""",
+                    5. Extract important dates, statistics, quotes, and ensure accurate source attribution (including links where appropriate). """,
     model = st.session_state.selected_model
 )
 
@@ -150,17 +115,19 @@ writer_agent = Agent(
                     2. Emphasize clarity and narrative flow, using transitions that make sense for readers.
                     3. Summarize key insights briefly at the beginning and end of sections.
                     4. Maintain factual accuracy while making complex topics accessible.
-                    5. Include all essential information from the source material, such as dates, quotes, sources, and source links.""",
+                    5. Include all essential information from the source material, such as dates, quotes, sources, and source links.
+                    6. Make sure all text is formatted correctly and rendered properly.""",
     model = st.session_state.selected_model
 )
 
+# define agent workflow
 def run_workflow(query):
     print("Running Duckduckgo Research Assistant workflow...")
 
     # search the web
     raw_response = client.run(
         agent = web_search_agent,
-        max_turns = 2,
+        max_turns = 3,
         messages = [{"role": "user", "content": f"Search Duckduckgo for {query}"}],
     )
     # print(news_response)
@@ -173,7 +140,6 @@ def run_workflow(query):
     )
 
     # print(research_analysis_response)
-
     deduplicated_information = research_analysis_response.messages[-1]["content"]
 
     # Edit and publish the analyzed results
@@ -183,9 +149,42 @@ def run_workflow(query):
     )
 
     # print(publication_response)
-
     return publication_response.messages[-1]["content"]
 
+
+# Define callback function for model selection
+def update_model():
+    st.session_state.selected_model = st.session_state.model_dropdown
+
+# streamlit app
+st.set_page_config(page_title="Duckduckgo Research Assistant 🔎", page_icon="🔎")
+st.title("Duckduckgo Web and News Research Assistant 🔎")
+st.write("Search for a topic and generate an article with multi-agent RAG. Note: some models may not support tools.")
+
+
+# Create two columns for the input and clear button
+col1, col2 = st.columns([3, 1])
+
+# Search query input
+with col1:
+    query = st.text_input(label = "Enter your search query",label_visibility = "collapsed",  placeholder = "Enter your search query")
+
+    selected_model = st.selectbox(
+        f"Choose a model. Default: **{default_model}**:",
+        options = ids,
+        index=ids.index(st.session_state.selected_model),
+        key="model_dropdown",
+        on_change=update_model
+    )
+    st.write(f"You have selected the model: **{selected_model}**")
+
+# Clear button
+with col2:
+    if st.button("Clear"):
+        st.session_state.query = ""
+        st.session_state.article = ""
+        st.session_state.selected_model = default_model
+        st.rerun()
 
 # Generate article only when button is clicked
 if st.button("Generate Article") and query:
