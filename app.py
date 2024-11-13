@@ -9,19 +9,19 @@ import os
 from groq import Groq
 from microagent import Microagent, Agent
 
-# load_dotenv()
-# openai.api_key = os.getenv("GROQ_API_KEY")
-openai.api_key = st.secrets["GROQ_API_KEY"]
+load_dotenv()
+openai.api_key = os.getenv("GROQ_API_KEY")
+#openai.api_key = st.secrets["GROQ_API_KEY"]
 
 
 
 # Initialize Groq client to get available models to choose from
-# groq_client = Groq(
-#     api_key=os.getenv("GROQ_API_KEY"),
-# )
 groq_client = Groq(
-    api_key=st.secrets["GROQ_API_KEY"],
-)
+     api_key=os.getenv("GROQ_API_KEY"),
+ )
+#groq_client = Groq(
+#    api_key=st.secrets["GROQ_API_KEY"],
+#)
 
 models = groq_client.models.list()
 ids = [item.id for item in  models.data]
@@ -76,102 +76,123 @@ def search_news(query):
         return news_results.strip()
     else:
         return f"Could not find news results for {query}"
+    
+### write a function for extract pdf file
 
 def transfer_to_researcher():
     """Transfer raw information immediately. """
     return researcher_agent
 
 # Define Agent 1 Role: Web search agent to fetch latest news
+"""
 web_search_agent = Agent(
     name = "Web Search Assistant",
-    instructions = """Your role is to gather the latest, high-quality articles on the specified topics using the internet search tools provided to you. 
+    instructions = Your role is to gather the latest, high-quality articles on the specified topics using the internet search tools provided to you. 
                     Make sure to leverage new insights with unique results, and focus on sources that are authoritative, recent, and relevant.
-                    Prioritize searching the news if the user is looking for recent information.""",
-    functions=[search_web, search_news],
-    model = st.session_state.selected_model,
-    tool_choice = "auto",
-)
+                    Prioritize searching the news if the user is looking for recent information.,
+""" 
+# pdf_search_agent
+def pdf_search(file):
+    text = ""
+    doc = PyMuPDF.open(file)
+    for page in doc:
+        text += page.get_text()
+    doc.close()
+    return text
+    
 
 # web_search_agent.functions.extend(transfer_to_researcher)
 
 # Define Agent 2 Role: Senior Research Analyst
-researcher_agent = Agent(
-    name = "Researcher Assistant",
-    instructions = """Your role is to analyze and synthesize the raw search results. Prioritize the following:
-                    1. Relevance and recency of information.
-                    2. Key topics organized by primary themes.
-                    3. Deduplication of content while flagging any contradictory statements.
-                    4. Enhanced focus on high-authority sources and verifying data across multiple sources.
-                    5. Extract important dates, statistics, quotes, and ensure accurate source attribution (including links where appropriate). """,
-    model = st.session_state.selected_model
+# Define Agent: PDF Content Extractor and Analyzer
+pdf_agent = Agent(
+    name="PDF Assistant",
+    instructions="""Your role is to read, extract, and analyze information from the provided PDF content. 
+                    Prioritize the following:
+                    1. Extract relevant information that aligns with the user’s query or topic of interest.
+                    2. Organize the content into primary themes and key topics.
+                    3. Remove duplicate information and flag any contradictory statements.
+                    4. Focus on extracting important dates, statistics, and quotes, ensuring accuracy in the context.
+                    5. Make sure to provide a structured overview with clear sections for easy readability.""",
+    functions=[pdf_search],
+    model = st.session_state.selected_model,
+    tool_choice = "auto",
+
 )
+
 
 # Define Agent 3 Role: Editor Agent
-writer_agent = Agent(
-    name = "Writer Assistant",
-    instructions = """Your role is to transform the de-duplicated research results into a clear, engaging, and production-ready article. 
+pdf_writer_agent = Agent(
+    name="PDF Writer Assistant",
+    instructions="""Your role is to transform the extracted PDF content into a clear, organized, and production-ready article or summary.
                     You should:
-                    1. Structure content into logical sections with headlines and subheadings.
-                    2. Emphasize clarity and narrative flow, using transitions that make sense for readers.
-                    3. Summarize key insights briefly at the beginning and end of sections.
-                    4. Maintain factual accuracy while making complex topics accessible.
-                    5. Include all essential information from the source material, such as dates, quotes, sources, and source links.
-                    6. Make sure all text is formatted correctly and rendered properly.""",
-    model = st.session_state.selected_model
+                    1. Structure the content into logical sections with headlines and subheadings based on main themes and topics in the PDF.
+                    2. Emphasize clarity and narrative flow, making sure content is easy to read and follows a logical order.
+                    3. Provide summaries of key insights at the beginning of each section, and a brief conclusion summarizing the overall content.
+                    4. Maintain factual accuracy and coherence, especially when working with fragmented or unstructured data.
+                    5. Include important details from the PDF, such as dates, statistics, quotes, and any cited sources.
+                    6. Ensure proper formatting, making the text visually accessible and organized for readers to easily follow.""",
+    model=st.session_state.selected_model
 )
-
 # define agent workflow
-def run_workflow(query):
-    print("Running Duckduckgo Research Assistant workflow...")
+# Workflow to process the query or PDF file
+def run_workflow(query, pdf_file=None):
+    print("Running PDF and Web Research Assistant workflow...")
 
-    # search the web
-    raw_response = client.run(
-        agent = web_search_agent,
-        max_turns = 3,
-        messages = [{"role": "user", "content": f"Search Duckduckgo for {query}"}],
-    )
-    # print(news_response)
-    raw_information = raw_response.messages[-1]["content"]
+    # Use pdf_agent if a PDF file is provided
+    if pdf_file is not None:
+        pdf_content = pdf_search(pdf_file)
+        pdf_response = client.run(
+            agent=pdf_agent,
+            messages=[{"role": "user", "content": pdf_content}],
+        )
+        raw_information = pdf_response.messages[-1]["content"]
+    else:
+        # Perform a web search if no PDF is provided
+        raw_response = client.run(
+            agent=web_search_agent,
+            max_turns=3,
+            messages=[{"role": "user", "content": f"Search for {query}"}],
+        )
+        raw_information = raw_response.messages[-1]["content"]
 
-    # analyze and synthesize the research results
+    # Analyze and synthesize the extracted information
     research_analysis_response = client.run(
-        agent = researcher_agent,
-        messages = [{"role": "user", "content": raw_information}],
+        agent=researcher_agent,
+        messages=[{"role": "user", "content": raw_information}],
     )
-
-    # print(research_analysis_response)
     deduplicated_information = research_analysis_response.messages[-1]["content"]
 
-    # Edit and publish the analyzed results
+    # Edit and format the synthesized results
     publication_response = client.run(
-        agent = writer_agent,
-        messages = [{"role": "user", "content": deduplicated_information}],
+        agent=writer_agent,
+        messages=[{"role": "user", "content": deduplicated_information}],
     )
-
-    # print(publication_response)
     return publication_response.messages[-1]["content"]
 
 
+
 # Define callback function for model selection
-def update_model():
-    st.session_state.selected_model = st.session_state.model_dropdown
+# Streamlit app setup
+st.set_page_config(page_title="Web and PDF Research Assistant 🔎", page_icon="🔎")
+st.title("Web and PDF Research Assistant 🔎")
+st.write("Search for a topic or upload a PDF to generate an article with multi-agent RAG. Note: some models may not support tools.")
 
-# streamlit app
-st.set_page_config(page_title="Duckduckgo Research Assistant 🔎", page_icon="🔎")
-st.title("Duckduckgo Web and News Research Assistant 🔎")
-st.write("Search for a topic and generate an article with multi-agent RAG. Note: some models may not support tools.")
-
-
-# Create two columns for the input and clear button
+# Create two columns for input (query or PDF) and the clear button
 col1, col2 = st.columns([3, 1])
 
-# Search query input
+# Input section for search query or PDF upload
 with col1:
-    query = st.text_input(label = "Enter your search query",label_visibility = "collapsed",  placeholder = "Enter your search query")
+    # Search query input
+    query = st.text_input(label="Enter your search query", label_visibility="collapsed", placeholder="Enter your search query (optional if uploading PDF)")
+    
+    # PDF file uploader
+    pdf_file = st.file_uploader("Or upload a PDF file", type="pdf")
 
+    # Model selection dropdown
     selected_model = st.selectbox(
         f"Choose a model. Default: **{default_model}**:",
-        options = ids,
+        options=ids,
         index=ids.index(st.session_state.selected_model),
         key="model_dropdown",
         on_change=update_model
@@ -187,17 +208,23 @@ with col2:
         st.rerun()
 
 # Generate article only when button is clicked
-if st.button("Generate Article") and query:
+if st.button("Generate Article"):
     with st.spinner("Generating article..."):
-        # Run workflow and get the final generated content
-        generated_content = run_workflow(query)
-        # print(generated_content)
-        st.session_state.query = query
-        st.session_state.article = generated_content
+        # Check if a PDF file is uploaded; if so, prioritize PDF processing
+        if pdf_file:
+            generated_content = run_workflow(query="", pdf_file=pdf_file)
+            st.session_state.query = "PDF content processed"
+        elif query:
+            generated_content = run_workflow(query=query)
+            st.session_state.query = query
+        else:
+            st.warning("Please enter a search query or upload a PDF file.")
+            generated_content = None
+        
+        # Store the generated content in the session state if available
+        if generated_content:
+            st.session_state.article = generated_content
 
 # Display the article if it exists in the session state
 if st.session_state.article:
     st.markdown(st.session_state.article, unsafe_allow_html=True)
-
-
-
